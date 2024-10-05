@@ -1,6 +1,23 @@
 const canvas = document.getElementById('tetris');
+if (!canvas) {
+    throw new Error("Cannot find the canvas element with ID 'tetris'. Make sure the canvas element is present in the HTML.");
+}
 const context = canvas.getContext('2d');
 context.scale(20, 20); // 캔버스의 스케일을 조정하여 블록을 더 크게 보이도록 설정
+
+const nextCanvas = document.getElementById('next');
+if (!nextCanvas) {
+    throw new Error("Cannot find the canvas element with ID 'next'. Make sure the next canvas element is present in the HTML.");
+}
+const nextContext = nextCanvas.getContext('2d');
+nextContext.scale(20, 20); // 다음 블록 미리보기 캔버스 스케일 설정
+
+let dropCounter = 0;
+let dropInterval = 1000; // 블록이 떨어지는 기본 시간 간격
+let lastTime = 0;
+let timer = 0;
+let stage = 1;
+let nextPiece = createPiece('TJLOSZI'[Math.floor(Math.random() * 7)]);
 
 // 아레나에서 꽉 찬 행을 제거하고 점수를 계산하는 함수
 function arenaSweep() {
@@ -18,6 +35,12 @@ function arenaSweep() {
 
         player.score += rowCount * 10; // 점수를 행에 따라 증가
         rowCount *= 2;
+
+        if (player.score >= stage * 100) {
+            stage++;
+            dropInterval *= 0.9; // 스테이지가 올라갈 때마다 속도 증가
+            updateStage();
+        }
     }
 }
 
@@ -94,16 +117,16 @@ function createPiece(type) {
 }
 
 // 주어진 매트릭스를 캔버스에 그리는 함수
-function drawMatrix(matrix, offset) {
+function drawMatrix(matrix, offset, ctx = context) {
     matrix.forEach((row, y) => {
         row.forEach((value, x) => {
             if (value !== 0) {
                 const colors = ['#FF0D72', '#0DC2FF', '#0DFF72', '#F538FF', '#FF8E0D', '#FFE138', '#3877FF'];
-                context.fillStyle = colors[value - 1]; // 블록의 색상을 설정
-                context.fillRect(x + offset.x, y + offset.y, 1, 1); // 블록을 그리기
-                context.strokeStyle = '#000';
-                context.lineWidth = 0.05;
-                context.strokeRect(x + offset.x, y + offset.y, 1, 1); // 블록의 테두리를 그리기
+                ctx.fillStyle = colors[value - 1]; // 블록의 색상을 설정
+                ctx.fillRect(x + offset.x, y + offset.y, 1, 1); // 블록을 그리기
+                ctx.strokeStyle = '#000';
+                ctx.lineWidth = 0.05;
+                ctx.strokeRect(x + offset.x, y + offset.y, 1, 1); // 블록의 테두리를 그리기
             }
         });
     });
@@ -116,6 +139,10 @@ function draw() {
 
     drawMatrix(arena, {x: 0, y: 0}); // 아레나 그리기
     drawMatrix(player.matrix, player.pos); // 플레이어 블록 그리기
+
+    nextContext.fillStyle = '#333';
+    nextContext.fillRect(0, 0, nextCanvas.width, nextCanvas.height); // 다음 블록 배경 그리기
+    drawMatrix(nextPiece, {x: 1, y: 1}, nextContext); // 다음 블록 그리기
 }
 
 // 플레이어 블록을 아레나에 병합하는 함수
@@ -165,15 +192,18 @@ function playerMove(dir) {
 
 // 새로운 블록을 생성하고 초기 위치를 설정하는 함수
 function playerReset() {
-    const pieces = 'TJLOSZI';
-    player.matrix = createPiece(pieces[pieces.length * Math.random() | 0]); // 랜덤한 블록 생성
+    player.matrix = nextPiece;
     player.pos.y = 0;
     player.pos.x = (arena[0].length / 2 | 0) - (player.matrix[0].length / 2 | 0); // 중앙에 위치하도록 설정
+    nextPiece = createPiece('TJLOSZI'[Math.floor(Math.random() * 7)]); // 다음 블록 생성
     if (collide(arena, player)) {
         arena.forEach(row => row.fill(0)); // 게임 오버 시 아레나 초기화
         alert('Game Over!'); // 게임 오버 메시지
         player.score = 0;
+        stage = 1;
+        dropInterval = 1000;
         updateScore();
+        updateStage();
     }
 }
 
@@ -214,38 +244,23 @@ function rotate(matrix, dir) {
     }
 }
 
-let dropCounter = 0;
-let dropInterval = 1000; // 블록이 떨어지는 기본 시간 간격
-
-let lastTime = 0;
-function update(time = 0) {
-    const deltaTime = time - lastTime;
-    lastTime = time;
-
-    dropCounter += deltaTime;
-    if (dropCounter > dropInterval) {
-        playerDrop(); // 일정 시간마다 블록을 떨어뜨림
-    }
-
-    draw(); // 캔버스 업데이트
-    requestAnimationFrame(update); // 애니메이션 프레임 요청
+function updateStage() {
+    document.getElementById('stage').innerText = `Stage: ${stage}`;
 }
 
-// 점수를 업데이트하는 함수
-function updateScore() {
-    const scoreElement = document.getElementById('score');
-    if (scoreElement) {
-        scoreElement.innerText = player.score; // 화면에 점수 표시
-    }
+function updateTimer() {
+    document.getElementById('timer').innerText = `Time: ${Math.floor(timer / 1000)}s`;
 }
 
-const arena = createMatrix(15, 30); // 아레나 생성 (너비 15, 높이 30)
+let arena = createMatrix(15, 30); // 아레나 생성 (너비 15, 높이 30)
 
 const player = {
     pos: {x: 0, y: 0},
     matrix: null,
     score: 0,
 };
+
+const pieces = 'TJLOSZI';
 
 // 키 입력 이벤트 처리
 document.addEventListener('keydown', event => {
@@ -269,6 +284,30 @@ document.addEventListener('keyup', event => {
     }
 });
 
+function update(time = 0) {
+    const deltaTime = time - lastTime;
+    lastTime = time;
+
+    dropCounter += deltaTime;
+    timer += deltaTime;
+
+    if (dropCounter > dropInterval) {
+        playerDrop(); // 일정 시간마다 블록을 떨어뜨림
+    }
+
+    draw(); // 캔버스 업데이트
+    updateTimer(); // 타이머 업데이트
+    requestAnimationFrame(update); // 애니메이션 프레임 요청
+}
+
+function updateScore() {
+    const scoreElement = document.getElementById('score');
+    if (scoreElement) {
+        scoreElement.innerText = `Score: ${player.score}`; // 화면에 점수 표시
+    }
+}
+
 playerReset(); // 첫 번째 블록 설정
 updateScore(); // 점수 초기화
+updateStage(); // 스테이지 초기화
 update(); // 게임 루프 시작
